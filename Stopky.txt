@@ -1,0 +1,130 @@
+#include "stm8s.h"
+#include "milis.h"
+//#include "stdio.h"
+//#include "spse_stm8.h"
+//#include "stm8_hd44780.h"
+#include "swspi.h"
+
+#define MAX7219_NOP 0x0
+#define MAX7219_DIG0 0x1
+#define MAX7219_DIG1 0x2
+#define MAX7219_DIG2 0x3
+#define MAX7219_DIG3 0x4
+#define MAX7219_DIG4 0x5
+#define MAX7219_DIG5 0x6
+#define MAX7219_DIG6 0x7
+#define MAX7219_DIG7 0x8
+#define MAX7219_DECMODE 0x9
+#define MAX7219_INTENSITY 0xA
+#define MAX7219_SCANLIM 0xB
+#define MAX7219_SHUTDOWN 0xC
+#define MAX7219_DISTEST 0xF
+
+#define MAX7219_SHUTDOWN_NORMAL_MODE 0b1
+#define MAX7219_DECMODE_DIG_ALL 0b11111111
+#define MAX7219_DISTEST_OFF 0b0
+#define MAX7219_SCANLIM_DIG_ALL 0b111
+
+//start
+#define TLAC_A_GPIO GPIOB
+#define TLAC_A_PIN	GPIO_PIN_0
+//reset
+#define TLAC_B_GPIO	GPIOB
+#define TLAC_B_PIN	GPIO_PIN_1
+//uloz
+#define TLAC_C_GPIO	GPIOB
+#define TLAC_C_PIN	GPIO_PIN_2
+
+void init_tlac(void);
+void process_tlac(void);
+void init_timer(void);
+
+uint8_t intensity=1;
+uint8_t i;
+volatile bool start=0,reset=0,uloz=0;
+uint32_t odpocet=0;
+uint16_t zbytek=0;
+
+uint8_t mezicasy_index=-1;
+uint8_t ulozeno=0;
+uint8_t stav=0;
+//uint8_t sekundy=0, minuty=0, hodiny=0;
+
+uint8_t cas[3]={
+0,0,0
+};
+
+uint8_t mezicasy[15]={
+	0,0,0,
+	0,0,0,
+	0,0,0,
+	0,0,0,
+	0,0,0
+};
+
+uint8_t i;
+uint8_t mezicasy_size;
+
+void main(void){
+CLK_HSIPrescalerConfig(CLK_PRESCALER_HSIDIV1); // taktovat MCU na 16MHz
+init_milis(); // spustit časovač millis
+swspi_init();
+init_tlac();
+init_timer();
+swspi_adressXdata(MAX7219_DECMODE,MAX7219_DECMODE_DIG_ALL);
+swspi_adressXdata(MAX7219_SHUTDOWN,MAX7219_SHUTDOWN_NORMAL_MODE);
+swspi_adressXdata(MAX7219_DISTEST,MAX7219_DISTEST_OFF);
+swspi_adressXdata(MAX7219_SCANLIM,MAX7219_SCANLIM_DIG_ALL);
+swspi_adressXdata(MAX7219_INTENSITY,intensity);
+swspi_adressXdata(MAX7219_DIG6,10);
+swspi_adressXdata(MAX7219_DIG7,10);
+swspi_send_time(cas[0],cas[1],cas[2]);
+
+
+
+  while (1){
+		mezicasy_size=sizeof(mezicasy);
+		switch(stav){
+			case 0://zastaveno
+				if(reset==1){
+					cas[0]=0;
+					cas[1]=0;
+					cas[2]=0;
+					swspi_send_time(cas[0],cas[1],cas[2]);
+					swspi_adressXdata(MAX7219_DIG7,10);
+					reset=0;
+					//mažeme všechny záznamy z paměti mezičasů
+					while(i<mezicasy_size){
+						mezicasy[i]=0;
+						i++;
+					}
+					i=0;
+					mezicasy_index=-1;
+					ulozeno=0;
+				}
+				
+				if (uloz==1){
+					uloz=0;
+					if (mezicasy[0]>0 || mezicasy[1]>0 || mezicasy[2]>0){
+						swspi_adressXdata(MAX7219_DIG7,ulozeno+1);
+						swspi_send_time(mezicasy[ulozeno*3],mezicasy[ulozeno*3+1],mezicasy[ulozeno*3+2]);						
+						ulozeno++;
+						//procházíme mezičasy
+						while (mezicasy[ulozeno*3]==0 && mezicasy[ulozeno*3+1]==0 && mezicasy[ulozeno*3+2]==0){
+							ulozeno++;
+							if (ulozeno>(mezicasy_size/3-1)){ulozeno=0;}
+						}
+						if (ulozeno>(mezicasy_size/3-1)){ulozeno=0;}
+					}
+				}
+				
+				if (start==1){
+					start=0;
+					stav=1;
+					ulozeno=0;
+					
+					//na pozici, kde bylo předtím číslo uloženého mezičasu opět zapíšeme čárku
+					swspi_adressXdata(MAX7219_DIG7,10);
+				}
+				
+				break;
