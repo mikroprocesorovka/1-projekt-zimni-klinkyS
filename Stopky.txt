@@ -128,3 +128,168 @@ swspi_send_time(cas[0],cas[1],cas[2]);
 				}
 				
 				break;
+				
+			case 1:
+				if (milis()-(odpocet-zbytek)>9){
+					cas[0]++;
+					//obsluha časování
+					if (cas[0]>99){
+						if (cas[1]!=59 || cas[2]!=59){
+							cas[0]=0;
+							cas[1]++;
+							if (cas[1]>59){
+								if (cas[2]!=59){
+									cas[1]=0;
+									cas[2]++;
+									if (cas[2]>59){
+										cas[2]=59;
+									}
+								}
+								else{cas[1]=59;}
+							}
+						}
+						else{cas[0]=99;}
+					}
+					
+					//stopky nám přetečou v tuto chvíli
+					if (cas[0]==99 && cas[1]==59 && cas[2]==59){
+						stav=0;
+						cas[0]=0;
+						cas[1]=0;
+						cas[2]=0;
+					}
+					odpocet=milis();
+					zbytek=milis()-odpocet;
+					swspi_send_time(cas[0],cas[1],cas[2]);
+				}
+				
+				if (uloz==1){
+					//ukládáme aktuální čas
+					uloz=0;
+					mezicasy_index++;
+					if (mezicasy_index>(mezicasy_size/3-1)){
+						mezicasy_index=mezicasy_size/3-1;
+						while(i<(mezicasy_size/3)){
+							mezicasy[i*3]=mezicasy[(i+1)*3];
+							mezicasy[i*3+1]=mezicasy[(i+1)*3+1];
+							mezicasy[i*3+2]=mezicasy[(i+1)*3+2];
+							i++;
+						}
+						i=0;
+					}
+					mezicasy[mezicasy_index*3]=cas[0];
+					mezicasy[mezicasy_index*3+1]=cas[1];
+					mezicasy[mezicasy_index*3+2]=cas[2];
+					
+					//blikneme displejem - na všechny digity dáme prázdné pole
+					swspi_send_time(10,10,10);
+				}
+				
+				if (reset==1){
+					reset=0;
+					stav=0;
+					//nastavujeme čas na počátek
+					cas[0]=0;
+					cas[1]=0;
+					cas[2]=0;
+					//mažeme všechny záznamy z paměti mezičasů
+					while(i<mezicasy_size){
+						mezicasy[i]=0;
+						i++;
+					}
+					i=0;
+					
+					//zresetujeme a zašleme na displej samé nuly
+					swspi_send_time(cas[0],cas[1],cas[2]);
+					
+					//index pro uložení dáme na takovou hodnotu, aby se na příslušnou část post uložil čas
+					mezicasy_index=-1;
+					ulozeno=0;
+				}
+				
+				if (start==1){
+					start=0;
+					stav=0;
+				}
+				break;
+		}
+	}
+}
+
+
+INTERRUPT_HANDLER(TIM3_UPD_OVF_BRK_IRQHandler, 15)
+ {
+	 TIM3_ClearITPendingBit(TIM3_IT_UPDATE);
+	 process_tlac();
+ }
+
+void init_timer(void){
+	TIM3_TimeBaseInit(TIM3_PRESCALER_16,1999);
+	TIM3_ITConfig(TIM3_IT_UPDATE, ENABLE);
+	TIM3_Cmd(ENABLE);
+}
+
+
+void init_tlac(void){
+GPIO_Init(TLAC_A_GPIO,TLAC_A_PIN,GPIO_MODE_IN_PU_NO_IT);
+GPIO_Init(TLAC_B_GPIO,TLAC_B_PIN,GPIO_MODE_IN_PU_NO_IT);
+GPIO_Init(TLAC_C_GPIO,TLAC_C_PIN,GPIO_MODE_IN_PU_NO_IT);
+}
+
+void process_tlac(void){
+	static bool minuleA=0;
+	static bool minuleB=0;
+	static bool minuleC=0;
+	static bool tedA=0;
+	static bool tedB=0;
+	static bool tedC=0;
+	
+		if (GPIO_ReadInputPin(TLAC_A_GPIO,TLAC_A_PIN)==RESET){tedA=1;}
+		else{tedA=0;}
+		
+		if (GPIO_ReadInputPin(TLAC_B_GPIO,TLAC_B_PIN)==RESET){tedB=1;}
+		else{tedB=0;}
+		
+		if (GPIO_ReadInputPin(TLAC_C_GPIO,TLAC_C_PIN)==RESET){tedC=1;}
+		else{tedC=0;}
+		
+		
+		if((tedA==1) && (minuleA==0)){
+			start=1;
+		}
+		if((tedB==1) && (minuleB==0)){
+			reset=1;
+		}
+		if((tedC==1) && (minuleC==0)){
+			uloz=1;
+		}
+		
+	minuleA=tedA;
+	minuleB=tedB;
+	minuleC=tedC;
+}
+
+
+#ifdef USE_FULL_ASSERT
+
+/**
+  * @brief  Reports the name of the source file and the source line number
+  *   where the assert_param error has occurred.
+  * @param file: pointer to the source file name
+  * @param line: assert_param error line source number
+  * @retval : None
+  */
+void assert_failed(u8* file, u32 line)
+{ 
+  /* User can add his own implementation to report the file name and line number,
+     ex: printf("Wrong parameters value: file %s on line %d\r\n", file, line) */
+
+  /* Infinite loop */
+  while (1)
+  {
+  }
+}
+#endif
+
+
+/************************ (C) COPYRIGHT STMicroelectronics *****END OF FILE****/
